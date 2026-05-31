@@ -1,73 +1,107 @@
 <div>Teachable Machine Image Model</div>
 <button type="button" onclick="init()">Start</button>
+<button type="button" id="switch-btn" onclick="switchCamera()" style="display:none;">切換鏡頭</button>
+
 <div id="webcam-container"></div>
 <div id="label-container"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
 <script type="text/javascript">
-    // More API functions here:
-    // https://github.com/googlecreativelab/teachablemachine-community/tree/master/libraries/image
 
-    // the link to your model provided by Teachable Machine export panel
     const URL = "https://teachablemachine.withgoogle.com/models/B4wQQ-hcM/";
 
     let model, webcam, labelContainer, maxPredictions;
+    let currentFacingMode = "user"; // "user" 代表前鏡頭，"environment" 代表後鏡頭
+    let isInitialized = false;
 
-    // Load the image model and setup the webcam
+    // 1. 初始化模型與相機
     async function init() {
+        if (isInitialized) return; // 防止重複點擊 Start
+
         const modelURL = URL + "model.json";
         const metadataURL = URL + "metadata.json";
 
-        // load the model and metadata
-        // Refer to tmImage.loadFromFiles() in the API to support files from a file picker
-        // or files from your local hard drive
-        // Note: the pose library adds "tmImage" object to your window (window.tmImage)
         model = await tmImage.load(modelURL, metadataURL);
         maxPredictions = model.getTotalClasses();
 
-        // Convenience function to setup a webcam
-        const flip = true; // whether to flip the webcam
-        webcam = new tmImage.Webcam(200, 200, flip); // width, height, flip
-        await webcam.setup(); // request access to the webcam
-        await webcam.play();
-        window.requestAnimationFrame(loop);
+        // 啟動相機
+        await startWebcam(currentFacingMode);
 
-        // append elements to the DOM
-        document.getElementById("webcam-container").appendChild(webcam.canvas);
         labelContainer = document.getElementById("label-container");
-        for (let i = 0; i < maxPredictions; i++) { // and class labels
+        labelContainer.innerHTML = ""; // 清空舊內容
+        for (let i = 0; i < maxPredictions; i++) {
             labelContainer.appendChild(document.createElement("div"));
         }
+
+        // 顯示切換鏡頭按鈕
+        document.getElementById("switch-btn").style.display = "inline-block";
+        isInitialized = true;
+    }
+
+    // 2. 獨立出啟動相機的函式，方便重複呼叫
+    async function startWebcam(facingMode) {
+        // 如果原本就有相機在執行，先停止它並移除畫面
+        if (webcam) {
+            await webcam.stop();
+            document.getElementById("webcam-container").innerHTML = "";
+        }
+
+        // 判斷是否需要左右鏡像翻轉（通常前鏡頭需要翻轉，後鏡頭不需要）
+        const flip = (facingMode === "user"); 
+
+        // 建立相機物件
+        webcam = new tmImage.Webcam(200, 200, flip);
+        
+        // 【核心修改】透過內建參數，強迫瀏覽器要求指定的鏡頭（前鏡頭或後鏡頭）
+        await webcam.setup({ facingMode: facingMode }); 
+        
+        await webcam.play();
+        
+        // 將新的相機畫布塞進 HTML
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        
+        // 開始執行辨識迴圈
+        window.requestAnimationFrame(loop);
+    }
+
+    // 3. 切換鏡頭的按鈕功能
+    async function switchCamera() {
+        if (!webcam) return;
+
+        // 切換鏡頭狀態
+        if (currentFacingMode === "user") {
+            currentFacingMode = "environment"; // 改為後鏡頭
+        } else {
+            currentFacingMode = "user"; // 改為前鏡頭
+        }
+
+        // 重新啟動相機
+        await startWebcam(currentFacingMode);
     }
 
     async function loop() {
-        webcam.update(); // update the webcam frame
-        await predict();
-        window.requestAnimationFrame(loop);
+        if (webcam && webcam.canvas) {
+            webcam.update(); 
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
     }
 
-    // run the webcam image through the image model
     async function predict() {
-        // predict 可以傳入 image、video 或 canvas HTML 元件
         const prediction = await model.predict(webcam.canvas);
-        
-        // 假設你想要偵測的目標是陣列中的第一個類別 (索引值為 0)
-        // 你也可以把 0 改成你主要想判斷的那個類別的索引
         const targetClass = prediction[0]; 
 
-        let resultText = "";
-        if (targetClass.probability >= 0.50) {
-            resultText = targetClass.className ;
-        } else {
-            resultText = targetClass.className;
-        }
+        let resultText = targetClass.className;
 
-        // 直接把結果顯示在第一個 label 容器中
-        labelContainer.childNodes[0].innerHTML = resultText;
+        if (labelContainer.childNodes[0]) {
+            labelContainer.childNodes[0].innerHTML = resultText;
+        }
         
-        // 清空其他可能存在的 label 欄位，保持畫面乾淨
         for (let i = 1; i < maxPredictions; i++) {
-            labelContainer.childNodes[i].innerHTML = "";
+            if (labelContainer.childNodes[i]) {
+                labelContainer.childNodes[i].innerHTML = "";
+            }
         }
     }
 </script>
