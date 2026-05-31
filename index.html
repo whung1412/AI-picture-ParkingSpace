@@ -90,14 +90,28 @@
 
     async function predict() {
         const prediction = await model.predict(webcam.canvas);
-        const targetClass = prediction[0]; 
+        
+        // 初始化：先假設第一個類別是最高的
+        let highestClass = prediction[0];
+        
+        // 用迴圈跑過所有類別，找出機率最高的那一個
+        for (let i = 1; i < maxPredictions; i++) {
+            if (prediction[i].probability > highestClass.probability) {
+                highestClass = prediction[i];
+            }
+        }
 
-        let resultText = targetClass.className;
+        // 畫面上直接顯示目前機率最高的類別名稱（例如：有車位 或 沒車位）
+        // 並且加上信心度（機率），方便你除錯
+        let confidence = (highestClass.probability * 100).toFixed(0); // 轉成百分比，例如 95%
+        let resultText = `${highestClass.className} (${confidence}%)`;
 
+        // 顯示在第一個 label 欄位
         if (labelContainer.childNodes[0]) {
             labelContainer.childNodes[0].innerHTML = resultText;
         }
         
+        // 清空其他欄位
         for (let i = 1; i < maxPredictions; i++) {
             if (labelContainer.childNodes[i]) {
                 labelContainer.childNodes[i].innerHTML = "";
