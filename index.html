@@ -1,121 +1,194 @@
-<div>Teachable Machine Image Model</div>
-<button type="button" onclick="init()">Start</button>
-<button type="button" id="switch-btn" onclick="switchCamera()" style="display:none;">切換鏡頭</button>
-
-<div id="webcam-container"></div>
-<div id="label-container"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
-<script type="text/javascript">
-
-    const URL = "https://teachablemachine.withgoogle.com/models/B4wQQ-hcM/";
-
-    let model, webcam, labelContainer, maxPredictions;
-    let currentFacingMode = "user"; // "user" 代表前鏡頭，"environment" 代表後鏡頭
-    let isInitialized = false;
-
-    // 1. 初始化模型與相機
-    async function init() {
-        if (isInitialized) return; // 防止重複點擊 Start
-
-        const modelURL = URL + "model.json";
-        const metadataURL = URL + "metadata.json";
-
-        model = await tmImage.load(modelURL, metadataURL);
-        maxPredictions = model.getTotalClasses();
-
-        // 啟動相機
-        await startWebcam(currentFacingMode);
-
-        labelContainer = document.getElementById("label-container");
-        labelContainer.innerHTML = ""; // 清空舊內容
-        for (let i = 0; i < maxPredictions; i++) {
-            labelContainer.appendChild(document.createElement("div"));
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teachable Machine 車位偵測</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
         }
 
-        // 顯示切換鏡頭按鈕
-        document.getElementById("switch-btn").style.display = "inline-block";
-        isInitialized = true;
-    }
-
-    // 2. 獨立出啟動相機的函式，方便重複呼叫
-    async function startWebcam(facingMode) {
-        // 如果原本就有相機在執行，先停止它並移除畫面
-        if (webcam) {
-            await webcam.stop();
-            document.getElementById("webcam-container").innerHTML = "";
+        .title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
         }
 
-        // 判斷是否需要左右鏡像翻轉（通常前鏡頭需要翻轉，後鏡頭不需要）
-        const flip = (facingMode === "user"); 
-
-        // 建立相機物件
-        webcam = new tmImage.Webcam(200, 200, flip);
-        
-        // 【核心修改】透過內建參數，強迫瀏覽器要求指定的鏡頭（前鏡頭或後鏡頭）
-        await webcam.setup({ facingMode: facingMode }); 
-        
-        await webcam.play();
-        
-        // 將新的相機畫布塞進 HTML
-        document.getElementById("webcam-container").appendChild(webcam.canvas);
-        
-        // 開始執行辨識迴圈
-        window.requestAnimationFrame(loop);
-    }
-
-    // 3. 切換鏡頭的按鈕功能
-    async function switchCamera() {
-        if (!webcam) return;
-
-        // 切換鏡頭狀態
-        if (currentFacingMode === "user") {
-            currentFacingMode = "environment"; // 改為後鏡頭
-        } else {
-            currentFacingMode = "user"; // 改為前鏡頭
+        .btn-container {
+            margin-bottom: 20px;
+        }
+        button {
+            font-size: 18px; 
+            padding: 12px 24px;
+            margin: 0 10px;
+            border: none;
+            border-radius: 8px;
+            background-color: #007bff;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #switch-btn {
+            background-color: #28a745;
+        }
+        #switch-btn:hover {
+            background-color: #218838;
         }
 
-        // 重新啟動相機
-        await startWebcam(currentFacingMode);
-    }
+        /* 💡 放大相機外框，並確保畫布充滿外框 */
+        #webcam-container {
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            background-color: #000;
+            width: 360px;  /* 從 200px 放大到 360px */
+            height: 360px; /* 從 200px 放大到 360px */
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* 確保相機產生的 canvas 自動填滿 360x360 的外框 */
+        #webcam-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+        }
 
-    async function loop() {
-        if (webcam && webcam.canvas) {
-            webcam.update(); 
-            await predict();
+        #label-container {
+            font-size: 32px; /* 結果字體也稍微再放大一點 */
+            font-weight: 800; 
+            color: #17a2b8;
+            text-align: center;
+            min-height: 45px;
+            padding: 12px 25px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="title">Teachable Machine 車位偵測系統</div>
+    
+    <div class="btn-container">
+        <button type="button" onclick="init()">開始偵測</button>
+        <button type="button" id="switch-btn" onclick="switchCamera()" style="display:none;">切換鏡頭</button>
+    </div>
+
+    <div id="webcam-container"></div>
+    <div id="label-container">點擊上方按鈕開始</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <script type="text/javascript">
+
+        const URL = "https://teachablemachine.withgoogle.com/models/B4wQQ-hcM/";
+
+        let model, webcam, labelContainer, maxPredictions;
+        let currentFacingMode = "user"; 
+        let isInitialized = false;
+
+        async function init() {
+            if (isInitialized) return; 
+
+            document.getElementById("label-container").innerHTML = "模型載入中...";
+            
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+
+            model = await tmImage.load(modelURL, metadataURL);
+            maxPredictions = model.getTotalClasses();
+
+            await startWebcam(currentFacingMode);
+
+            labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = ""; 
+            for (let i = 0; i < maxPredictions; i++) {
+                labelContainer.appendChild(document.createElement("div"));
+            }
+
+            document.getElementById("switch-btn").style.display = "inline-block";
+            isInitialized = true;
+        }
+
+        async function startWebcam(facingMode) {
+            if (webcam) {
+                await webcam.stop();
+                document.getElementById("webcam-container").innerHTML = "";
+            }
+
+            const flip = (facingMode === "user"); 
+
+            // 💡 這裡將原本的 (200, 200, flip) 修改為 (360, 360, flip)
+            webcam = new tmImage.Webcam(360, 360, flip); 
+            await webcam.setup({ facingMode: facingMode }); 
+            await webcam.play();
+            
+            document.getElementById("webcam-container").appendChild(webcam.canvas);
             window.requestAnimationFrame(loop);
         }
-    }
 
-    async function predict() {
-        const prediction = await model.predict(webcam.canvas);
-        
-        // 初始化：先假設第一個類別是最高的
-        let highestClass = prediction[0];
-        
-        // 用迴圈跑過所有類別，找出機率最高的那一個
-        for (let i = 1; i < maxPredictions; i++) {
-            if (prediction[i].probability > highestClass.probability) {
-                highestClass = prediction[i];
+        async function switchCamera() {
+            if (!webcam) return;
+
+            if (currentFacingMode === "user") {
+                currentFacingMode = "environment"; 
+            } else {
+                currentFacingMode = "user"; 
+            }
+
+            await startWebcam(currentFacingMode);
+        }
+
+        async function loop() {
+            if (webcam && webcam.canvas) {
+                webcam.update(); 
+                await predict();
+                window.requestAnimationFrame(loop);
             }
         }
 
-        // 畫面上直接顯示目前機率最高的類別名稱（例如：有車位 或 沒車位）
-        // 並且加上信心度（機率），方便你除錯
-        let confidence = (highestClass.probability * 100).toFixed(0); // 轉成百分比，例如 95%
-        let resultText = `${highestClass.className} (${confidence}%)`;
+        async function predict() {
+            const prediction = await model.predict(webcam.canvas);
+            
+            let highestClass = prediction[0];
+            
+            for (let i = 1; i < maxPredictions; i++) {
+                if (prediction[i].probability > highestClass.probability) {
+                    highestClass = prediction[i];
+                }
+            }
 
-        // 顯示在第一個 label 欄位
-        if (labelContainer.childNodes[0]) {
-            labelContainer.childNodes[0].innerHTML = resultText;
-        }
-        
-        // 清空其他欄位
-        for (let i = 1; i < maxPredictions; i++) {
-            if (labelContainer.childNodes[i]) {
-                labelContainer.childNodes[i].innerHTML = "";
+            let confidence = (highestClass.probability * 100).toFixed(0);
+            let resultText = `${highestClass.className} (${confidence}%)`;
+
+            if (labelContainer.childNodes[0]) {
+                labelContainer.childNodes[0].innerHTML = resultText;
+            }
+            
+            for (let i = 1; i < maxPredictions; i++) {
+                if (labelContainer.childNodes[i]) {
+                    labelContainer.childNodes[i].innerHTML = "";
+                }
             }
         }
-    }
-</script>
+    </script>
+</body>
+</html>
